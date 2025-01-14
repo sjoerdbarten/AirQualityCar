@@ -13,13 +13,13 @@ import osmnx as ox
 
 
 #Switches
-date = dt.date(2024,11,11)       #YYYY,MM,DD
-GPS_switch = False              #True/False
-OPS_switch = False              #True/False
-CO2_switch = False              #True/False
-SO2_switch = False              #True/False
+date = dt.date(2025,1,7)       #YYYY,MM,DD
+GPS_switch = True              #True/False
+OPS_switch = True              #True/False
+CO2_switch = True              #True/False
+SO2_switch = True              #True/False
 UFP_switch = True              #True/False
-NO2_switch = False              #True/False
+NO2_switch = True              #True/False
 plot_figures = True             #True/False
 
 
@@ -46,7 +46,7 @@ if GPS_switch == True:
         gps_data = file.read()
 
     lines = gps_data.strip().split("\n")
-
+    
     gga_data = []
     rmc_data = []
 
@@ -62,7 +62,7 @@ if GPS_switch == True:
         
         timestamp = parts[0] + ' ' + parts[1]
         sentence = ','.join(parts[2:])
-
+        
         if sentence.startswith('$GNGGA'):
             try:
                 msg = pynmea2.parse(sentence)
@@ -96,20 +96,30 @@ if GPS_switch == True:
 
     gga_df = pd.DataFrame(gga_data)
     rmc_df = pd.DataFrame(rmc_data)
-
+    
     if not gga_df.empty and not rmc_df.empty:
         df = pd.merge(gga_df, rmc_df, on='Time', suffixes=('_GGA', '_RMC'))
+        df['Latitude'] = df['Latitude_GGA'].combine_first(df['Latitude_RMC']).round(7)
+        df['Longitude'] = df['Longitude_GGA'].combine_first(df['Longitude_RMC']).round(7)
+        df['Datetime'] = df['Timestamp_GGA'].combine_first(df['Timestamp_RMC'])
+        df.set_index('Datetime', inplace=True)
+        df.drop(['Timestamp_GGA', 'Timestamp_RMC','Latitude_GGA', 'Longitude_GGA', 'Latitude_RMC', 'Longitude_RMC','Date','HDOP','Time'], axis=1, inplace=True)
     else:
-        print("No data to merge.")
-    
-    df['Latitude'] = df['Latitude_GGA'].combine_first(df['Latitude_RMC']).round(7)
-    df['Longitude'] = df['Longitude_GGA'].combine_first(df['Longitude_RMC']).round(7)
-    df['Datetime'] = df['Timestamp_GGA'].combine_first(df['Timestamp_RMC'])
-    df.set_index('Datetime', inplace=True)
+        if not gga_df.empty:
+            df = gga_df
+            df['Datetime'] = df['Timestamp']
+            df.set_index('Datetime', inplace=True)
+            df.drop(['Timestamp','HDOP','Time'], axis=1, inplace=True)
+        if not rmc_df.empty:
+            df = rmc_df
+            df['Datetime'] = df['Timestamp']
+            df.set_index('Datetime', inplace=True)
+            df.drop(['Timestamp','Date','HDOP','Time'], axis=1, inplace=True)
+        print("No GGA or RMC data to merge.")
+        
     df.index = pd.to_datetime(df.index)
     df.sort_index(inplace=True)
     df = df[~df.index.duplicated(keep='first')]
-    df.drop(['Timestamp_GGA', 'Timestamp_RMC','Latitude_GGA', 'Longitude_GGA', 'Latitude_RMC', 'Longitude_RMC','Date','HDOP','Time'], axis=1, inplace=True)
     df = df.reindex(columns=['Latitude', 'Longitude', 'Altitude', 'Speed (km/h)', 'Course'])
     df = df[~((df['Latitude'] == 0.0) & (df['Longitude'] == 0.0))]
     
@@ -125,7 +135,7 @@ if GPS_switch == True:
         # Calculate bounding box based on the dataframe with some buffer
         north = df_resampled['Latitude'].max() + 0.01
         south = df_resampled['Latitude'].min() - 0.01
-        east = df_resampled['Longitude'].max() + 0.01 
+        east = df_resampled['Longitude'].max() + 0.01
         west = df_resampled['Longitude'].min() - 0.01
         G = ox.graph_from_bbox(north, south, east, west, network_type='all')
         roads = ox.graph_to_gdfs(G, nodes=False, edges=True)
@@ -302,8 +312,8 @@ if UFP_switch == True:
         with open(os.path.join(UFP_path, filename), 'r') as f:
             lines = f.readlines()
             
-    startdate = [line for line in lines if line.startswith('Start: ')][0][7:26]
-    startdate = dt.datetime.strptime(startdate, '%d.%m.%Y %H:%M:%S')
+    startdate = [line for line in lines if line.startswith('Start: ')][0][7:]
+    startdate = dt.datetime.strptime(startdate.strip(), '%d.%m.%Y %H:%M:%S')
 
     df['Datetime'] = np.array([startdate + dt.timedelta(seconds=i) for i in range(len(df))])
     df_resampled = df.set_index(df['Datetime'])
